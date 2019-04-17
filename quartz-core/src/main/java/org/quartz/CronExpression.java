@@ -1586,12 +1586,361 @@ public final class CronExpression implements Serializable, Cloneable {
     }
 
     /**
-     * NOT YET IMPLEMENTED: Returns the time before the given time
+     * NOT YET IMPLEMENTED: Returns the date(only year and month and day) before the given date
      * that the <code>CronExpression</code> matches.
      */ 
     public Date getTimeBefore(Date endTime) { 
-        // FUTURE_TODO: implement QUARTZ-423
-        return null;
+        TreeSet<Integer> reversedMoths=(TreeSet<Integer>)months.descendingSet();
+        TreeSet<Integer> reversedDaysOfMonth=(TreeSet<Integer>)daysOfMonth.descendingSet();
+        TreeSet<Integer> reversedYears=(TreeSet<Integer>)years.descendingSet();
+        TreeSet<Integer> reversedDaysOfWeek=(TreeSet<Integer>)daysOfWeek.descendingSet();
+
+        // Computation is based on Gregorian year only.
+        Calendar cl = new java.util.GregorianCalendar(getTimeZone()); 
+
+        // move ahead one second, since we're computing the time *after* the
+        // given time
+        endTime = new Date(endTime.getTime() + 1000);
+        // CronTrigger does not deal with milliseconds
+        cl.setTime(endTime);
+        cl.set(Calendar.MILLISECOND, 0);
+        cl.set(Calendar.SECOND, 0);
+        cl.set(Calendar.MINUTE, 0);
+        cl.set(Calendar.HOUR_OF_DAY, 0);
+
+
+        boolean gotOne = false;
+        // loop until we've computed the next time, or we've past the endTime
+        while (!gotOne) {
+
+            //if (endTime != null && cl.getTime().after(endTime)) return null;
+            if(cl.get(Calendar.YEAR) < 1970) { // prevent endless loop...
+                return null;
+            }
+
+            SortedSet<Integer> st = null;
+            int t = 0;
+
+ 
+            int day = cl.get(Calendar.DAY_OF_MONTH);
+            t = -1;
+
+
+
+            day = cl.get(Calendar.DAY_OF_MONTH);
+            int mon = cl.get(Calendar.MONTH) + 1;
+            // '+ 1' because calendar is 0-based for this field, and we are
+            // 1-based
+            t = -1;
+            int tmon = mon;
+            
+            // get day...................................................
+            System.out.println("lastdayOffset"+lastdayOffset);
+            boolean dayOfMSpec = !daysOfMonth.contains(NO_SPEC);
+            boolean dayOfWSpec = !daysOfWeek.contains(NO_SPEC);
+            if (dayOfMSpec && !dayOfWSpec) { // get day by day of month rule
+                st = reversedDaysOfMonth.tailSet(day);
+                if (lastdayOfMonth) {
+                    if(!nearestWeekday) {
+                        t = day;
+                        day = getLastDayOfMonth(mon, cl.get(Calendar.YEAR));
+                        day -= lastdayOffset;
+                        if(t < day) {
+                            mon--;
+                            if(mon == 0) { 
+                                mon = 12;
+                                tmon = 3333; // ensure test of mon != tmon further below fails
+                                cl.add(Calendar.YEAR, -1);
+                            }
+                            day = getLastDayOfMonth(mon, cl.get(Calendar.YEAR));
+                        }
+                    } else {
+                    	//LW
+                        t = day;
+                        day = getLastDayOfMonth(mon, cl.get(Calendar.YEAR));
+                        day -= lastdayOffset;
+                        
+                        java.util.Calendar tcal = java.util.Calendar.getInstance(getTimeZone());
+                        tcal.set(Calendar.DAY_OF_MONTH, day);
+                        tcal.set(Calendar.MONTH, mon - 1);
+                        tcal.set(Calendar.YEAR, cl.get(Calendar.YEAR));
+                        
+                        int ldom = getLastDayOfMonth(mon, cl.get(Calendar.YEAR));
+                        int dow = tcal.get(Calendar.DAY_OF_WEEK);
+                        //这么做是为了让月份不变，已达到离当前最近
+                        if(dow == Calendar.SATURDAY && day == 1) {
+                            day += 2;
+                        } else if(dow == Calendar.SATURDAY) {
+                            day -= 1;
+                        } else if(dow == Calendar.SUNDAY && day == ldom) { 
+                            day -= 2;
+                        } else if(dow == Calendar.SUNDAY) { 
+                            day += 1;
+                        }
+                    
+
+                        tcal.set(Calendar.DAY_OF_MONTH, day);
+                        tcal.set(Calendar.MONTH, mon - 1);
+                        Date nTime = tcal.getTime();
+                        //
+                        if(nTime.after(endTime)) {
+                            day = 1;
+                            //这里不用担心mon为-1，因为为-1之后就会为自动减一年，然后mon变为12
+                            mon--;
+                        }
+                    }
+                } else if(nearestWeekday) {
+                	//10W:一个月里离10号最近的工作日
+                    t = day;
+                    day = reversedDaysOfMonth.first();
+
+                    java.util.Calendar tcal = java.util.Calendar.getInstance(getTimeZone());
+
+                    tcal.set(Calendar.DAY_OF_MONTH, day);
+                    tcal.set(Calendar.MONTH, mon - 1);
+                    tcal.set(Calendar.YEAR, cl.get(Calendar.YEAR));
+                    
+                    int ldom = getLastDayOfMonth(mon, cl.get(Calendar.YEAR));
+                    int dow = tcal.get(Calendar.DAY_OF_WEEK);
+
+                    if(dow == Calendar.SATURDAY && day == 1) {
+                        day += 2;
+                    } else if(dow == Calendar.SATURDAY) {
+                        day -= 1;
+                    } else if(dow == Calendar.SUNDAY && day == ldom) { 
+                        day -= 2;
+                    } else if(dow == Calendar.SUNDAY) { 
+                        day += 1;
+                    }
+                        
+                
+
+                    tcal.set(Calendar.DAY_OF_MONTH, day);
+                    tcal.set(Calendar.MONTH, mon - 1);
+                    Date nTime = tcal.getTime();
+                    if(nTime.after(endTime)) {
+                        day = reversedDaysOfMonth.first();
+                        mon--;
+                    }
+                } else if (st != null && st.size() != 0) {
+                	//正常天数，0 0 0 1-25 4 ?
+                	//如果这个时候当前是4月1号，会先到下一个else切换到3月25号，然后在这部分程序发现日期符合，
+                	//但是后续有程序判断月份是不是符合，发现不符合就年份减1，变成上一年4月30号
+                    t = day;
+                    day = st.first();
+                    // make sure we don't over-run a short month, such as february
+                    //当配置成0 0 0 1-31 2 ？
+                    int lastDay = getLastDayOfMonth(mon, cl.get(Calendar.YEAR));
+                    if (day > lastDay) {
+                        day = reversedDaysOfMonth.first();
+                        mon--;
+                    }
+                } else {
+                	//如果当前日期day没有在可能day值里，比如4月1号，但是表达式里配置1-25，就会从上一个月符合最后一天开始找
+                    day = reversedDaysOfMonth.first();
+                    mon--;
+                }
+                
+                if (day != t || mon != tmon) {
+
+                    cl.set(Calendar.DAY_OF_MONTH, day);
+                    cl.set(Calendar.MONTH, mon - 1);
+                    // '- 1' because calendar is 0-based for this field, and we
+                    // are 1-based
+                    continue;
+                }
+            } else if (dayOfWSpec && !dayOfMSpec) { // get day by day of week rule
+                if (lastdayOfWeek) { // are we looking for the last XXX day of
+                    // the month?
+                	int lastDayOfWeekAndMonth=day;
+                	Calendar tmpCal=Calendar.getInstance();
+                	tmpCal.setTime(cl.getTime());
+                    int dow = daysOfWeek.first(); // desired
+                    // d-o-w
+                    int cDow = cl.get(Calendar.DAY_OF_WEEK); // current d-o-w
+                    int daysToAdd = 0;
+                    if (cDow < dow) {
+                        daysToAdd = dow - cDow;
+                    }
+                    if (cDow > dow) {
+                        daysToAdd = dow + (7 - cDow);
+                    }
+
+                    int lDay = getLastDayOfMonth(mon, cl.get(Calendar.YEAR));
+
+                    if (lastDayOfWeekAndMonth + daysToAdd > lDay) { // did we already miss the
+                        // last one?
+                    	lastDayOfWeekAndMonth-=7;
+                        // no '- 1' here because we are promoting the month
+
+                    }
+
+                    // find date of last occurrence of this day in this month...
+                    while ((lastDayOfWeekAndMonth + daysToAdd + 7) <= lDay) {
+                        daysToAdd += 7;
+                    }
+
+                    lastDayOfWeekAndMonth += daysToAdd;
+                    
+
+                    if (daysToAdd > 0) {
+
+                        cl.set(Calendar.DAY_OF_MONTH, lastDayOfWeekAndMonth);
+                        cl.set(Calendar.MONTH, mon - 1);
+                        // '- 1' here because we are not promoting the month
+                        if(cl.getTime().after(endTime)) {
+                            cl.set(Calendar.DAY_OF_MONTH, 1);
+                            cl.set(Calendar.MONTH, mon-2);
+                        }
+                        continue;
+                    }
+
+                } else if (nthdayOfWeek != 0) {
+                    // are we looking for the Nth XXX day in the month?
+                    int dow = daysOfWeek.first(); // desired
+                    // d-o-w
+                    int cDow = cl.get(Calendar.DAY_OF_WEEK); // current d-o-w
+                    int daysToAdd = 0;
+                    if (cDow < dow) {
+                        daysToAdd = dow - cDow;
+                    } else if (cDow > dow) {
+                        daysToAdd = dow + (7 - cDow);
+                    }
+
+                    boolean dayShifted = false;
+                    if (daysToAdd > 0) {
+                        dayShifted = true;
+                    }
+
+                    day += daysToAdd;
+                    int weekOfMonth = day / 7;
+                    if (day % 7 > 0) {
+                        weekOfMonth++;
+                    }
+
+                    daysToAdd = (nthdayOfWeek - weekOfMonth) * 7;
+                    day += daysToAdd;
+                    //这里因为可能出现nthdayOfWeek在这个月里合法，但是在nthdayOfWeek没有所需星期几，这个时候就往回找，总会找到
+                    if ( day > getLastDayOfMonth(mon, cl.get(Calendar.YEAR))) {
+
+                        cl.set(Calendar.DAY_OF_MONTH, 1);
+                        cl.set(Calendar.MONTH, mon-2);
+                        // no '- 1' here because we are promoting the month
+                        continue;
+                        //这里只有当传进来day星期几和第几个星期相等时才不会触发日期转换
+                    } else if (daysToAdd > 0 || dayShifted) {
+
+                        cl.set(Calendar.DAY_OF_MONTH, day);
+                        cl.set(Calendar.MONTH, mon - 1);
+                        if(cl.getTime().after(endTime)) {
+                            cl.set(Calendar.DAY_OF_MONTH, 1);
+                            cl.set(Calendar.MONTH, mon-2);
+                        }                        // '- 1' here because we are NOT promoting the month
+                        continue;
+                    }
+                } else {
+                    int cDow = cl.get(Calendar.DAY_OF_WEEK); // current d-o-w
+                    int dow = reversedDaysOfWeek.first(); // desired
+                    // d-o-w
+                    st = reversedDaysOfWeek.tailSet(cDow);
+                    if (st != null && st.size() > 0) {
+                        dow = st.first();
+                    }
+
+                    int daysToAdd = 0;
+                    if (cDow > dow) {
+                        daysToAdd = cDow - dow;
+                    }
+                    if (cDow < dow) {
+                        daysToAdd = cDow + (7 - dow);
+                    }
+
+
+                    if (day - daysToAdd < 1) { // will we pass the end of
+                        // the month?
+                    	//如果直接减daysToAdd，那么可能夸月会有问题，得到的也许不是想要的星期
+                    	cl.set(Calendar.DAY_OF_MONTH, 1);
+                    	cl.add(Calendar.DAY_OF_MONTH, -1);
+                        // no '- 1' here because we are promoting the month
+                        continue;
+                    } else if (daysToAdd > 0) { // are we swithing days?
+
+                        cl.set(Calendar.DAY_OF_MONTH, day - daysToAdd);
+                        cl.set(Calendar.MONTH, mon - 1);
+                        // '- 1' because calendar is 0-based for this field,
+                        // and we are 1-based
+                        continue;
+                    }
+                }
+            } else { // dayOfWSpec && !dayOfMSpec
+                throw new UnsupportedOperationException(
+                        "Support for specifying both a day-of-week AND a day-of-month parameter is not implemented.");
+            }
+            cl.set(Calendar.DAY_OF_MONTH, day);
+
+            mon = cl.get(Calendar.MONTH) + 1;
+            // '+ 1' because calendar is 0-based for this field, and we are
+            // 1-based
+            int year = cl.get(Calendar.YEAR);
+            t = -1;
+
+            // test for expressions that never generate a valid fire date,
+            // but keep looping...
+            if (year > MAX_YEAR) {
+                return null;
+            }
+
+            // get month...................................................
+            st = reversedMoths.tailSet(mon);
+            if (st != null && st.size() != 0) {
+                t = mon;
+                mon = st.first();
+            } else {
+                mon = reversedMoths.first();
+                year--;
+            }
+            if (mon != t) {
+
+                cl.set(Calendar.DAY_OF_MONTH, 1);
+                cl.set(Calendar.MONTH, mon);
+                cl.add(Calendar.DAY_OF_MONTH, -1);
+                // '- 1' because calendar is 0-based for this field, and we are
+                // 1-based
+                cl.set(Calendar.YEAR, year);
+                continue;
+            }
+            cl.set(Calendar.MONTH, mon - 1);
+            // '- 1' because calendar is 0-based for this field, and we are
+            // 1-based
+
+            year = cl.get(Calendar.YEAR);
+            t = -1;
+
+            // get year...................................................
+            st = reversedYears.tailSet(year);
+            if (st != null && st.size() != 0) {
+                t = year;
+                year = st.first();
+            } else {
+                return null; // ran out of years...
+            }
+
+            if (year != t) {
+
+                cl.set(Calendar.DAY_OF_MONTH, 1);
+                cl.set(Calendar.MONTH, 0);
+                // '- 1' because calendar is 0-based for this field, and we are
+                // 1-based
+                cl.set(Calendar.YEAR, year);
+                continue;
+            }
+            cl.set(Calendar.YEAR, year);
+
+            gotOne = true;
+        } // while( !done )
+
+        return cl.getTime();
+        // FUTURE_TODO: get next hour and minute and seconds
     }
 
     /**
